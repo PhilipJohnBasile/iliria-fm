@@ -27,9 +27,10 @@ figures are *under contention*, not isolated bests.
   context* — *"Private Cloud Compute is not available in this context. Please use the Terminal
   app."* Launch `fm serve` from **Terminal.app** and `/health` reports `pcc available: true`;
   an HTTP client then reaches it normally, since only the server's context matters.
-  Caveat: **2 of 5 PCC runs returned zero content tokens**, both on the same prompt ("List
-  three prime numbers greater than fifty") — reproducible, and most likely a guardrail refusal
-  surfaced in a response field this bench doesn't parse.
+  Caveat: some PCC runs return **zero content tokens** — reproducibly on "List three prime
+  numbers greater than fifty". `bench.py` now reports why, and it is *not* a refusal as first
+  assumed: `finish_reason = tool_calls`. PCC elects to **call a tool** for that prompt, and a
+  content-only reader sees nothing. Prompts that answer directly are unaffected.
 - **iliria is the deep, slow escalation** — ~40–70× the TTFT of the fast tiers. Exactly why
   it should serve only the hard minority of requests.
 
@@ -37,28 +38,34 @@ figures are *under contention*, not isolated bests.
 
 | path | TTFT | tok/s | n |
 |---|---|---|---|
-| racecontrol → trailbrake | 1.27 s | 26.7 | 4 |
-| racecontrol → trailbrake (`#deep`) | 1.64 s | 24.3 | 4 |
+| racecontrol → fm (edge), **after** the streaming fix | **0.678 s** | 29.4 | 4 |
+| racecontrol → trailbrake, *before* the streaming fix | 1.27 s\* | 26.7 | 4 |
 
-Throughput through the router matches direct (23–27 tok/s), i.e. **the router adds no
-meaningful decode overhead**.
+\* Pre-fix TTFT is not a real first-token time — see finding 1. Throughput through the router
+matches direct throughout (23–29 tok/s), i.e. **the router adds no meaningful decode
+overhead**; only first-token latency was affected.
 
-### Two findings worth chasing
+### Both findings resolved
 
-1. **No incremental streaming observed through the router.** On every routed run
-   `TTFT == total` (e.g. 1.272 s / 1.272 s), while direct engine runs show a normal split
-   (0.228 s / 1.946 s). The whole response arrives at once. Either racecontrol buffers its
-   SSE relay or the client buffers the router's chunked framing — worth disambiguating with
-   a raw-socket read, since streaming UX depends on it.
+1. **Streaming through the router was genuinely broken — now fixed.** Every routed run showed
+   `TTFT == total` (1.272 s / 1.272 s) against a normal 0.228 s / 1.946 s split direct. Root
+   cause was in racecontrol's `backends.py`: `read_chunk` used
+   `http.client.HTTPResponse.read(size)`, which on a chunked body blocks until it has
+   collected `size` bytes **or the body ends** — so with the default 65536, every SSE response
+   under 64 KB was buffered in full before a single byte was relayed. Proven with a chunked
+   test server (`read(65536)` → 1.005 s returning the whole body; `read1(65536)` → 0.000 s
+   returning the first chunk). Fixed by switching to `read1`, with a regression test; measured
+   after the fix: **0.678 s TTFT / 1.763 s total**. The module docstring had asserted the
+   opposite and was corrected too.
 
-2. **Tier selection did not honor `default_tier` in this config.** With both backends up,
-   requests were attributed (`X-Router-Backend`) to `trailbrake`/`fast` even with
-   `default_tier = "edge"`, with `policy = "edge"` (whose comment says a tier name "pins all
-   traffic to it"), and with `enable_task_heuristic = false`. Routing to fm **does** work —
-   with trailbrake stopped, the same request returned `X-Router-Backend: fm-system`,
-   `X-Router-Tier: edge`, HTTP 200 — so the edge path is functional, but it could not be
-   isolated while the fast tier was healthy. A clean router→fm number is therefore **not
-   reported here** rather than guessed at.
+2. **Tier selection was working as designed — my benchmark was wrong.** racecontrol's
+   `resolve_manual_override` treats a `model` naming a configured tier *or* backend
+   `id`/`model_id` as an explicit override that "bypasses the policy entirely" (a documented
+   escape hatch). The bench sent `--model default`, which matches trailbrake's
+   `model_id = "default"`, pinning every request to `fast` **before** any policy ran — which
+   is exactly why `policy = "edge"` and `enable_task_heuristic = false` appeared to do
+   nothing. Re-run with `--model system`, attribution confirms `X-Router-Backend: fm-system`,
+   `X-Router-Tier: edge`. No router bug here.
 
 ## Reproduce
 
