@@ -1,0 +1,65 @@
+# Example racecontrol config that adds Apple Foundation Models as router tiers.
+#
+# Prereq: run `./fm-serve.sh` (Apple's `fm serve`) on 127.0.0.1:8898. It exposes
+# the on-device model as model_id "system" and Private Cloud Compute as "pcc" on
+# one OpenAI-compatible endpoint. racecontrol treats it as an ordinary upstream;
+# nothing in the router core changes -- this is config only.
+#
+# Validate without starting anything:  racecontrol check-config --config router.fm.example.toml
+
+[server]
+host = "127.0.0.1"
+port = 8100
+api_key = ""
+
+[escalation]
+policy = "default"
+default_tier = "edge"          # start cheap on the on-device model...
+escalation_tier = "cloud"      # ...escalate hard prompts to Private Cloud Compute
+hard_markers = ["#deep", "#reason", "/escalate"]
+heuristic_threshold = 0.6
+enable_task_heuristic = true
+
+[circuit_breaker]
+failure_threshold = 3
+reset_after_s = 60.0
+
+[fallback]
+edge = "cloud"
+cloud = "edge"
+
+# -- Apple on-device (ANE): free, private, and off the Metal GPU your other
+#    engines use, which makes it a natural tier-0 for short/structured work. -----
+[[backends]]
+id = "fm-system"
+tier = "edge"
+base_url = "http://127.0.0.1:8898"
+model_id = "system"            # Apple on-device Foundation Model
+weight = 100
+enabled = true
+role = "primary"
+rollback_target = true
+connect_timeout_s = 5.0
+idle_timeout_s = 30.0
+
+# -- Apple Private Cloud Compute: larger context + stronger reasoning. Requires
+#    the com.apple.developer.private-cloud-compute entitlement/eligibility;
+#    until then `fm available` reports pcc unavailable and this backend's circuit
+#    breaker will hold it open (fallback = "edge" keeps requests served). --------
+[[backends]]
+id = "fm-pcc"
+tier = "cloud"
+base_url = "http://127.0.0.1:8898"
+model_id = "pcc"               # Apple Foundation Model on Private Cloud Compute
+weight = 100
+enabled = true
+role = "primary"
+rollback_target = true
+connect_timeout_s = 5.0
+idle_timeout_s = 60.0
+
+# To slot Apple's on-device model in FRONT of your own engines instead, keep your
+# existing trailbrake ("fast") + iliria ("deep") backends and add the fm-system
+# backend as a new "edge" tier with default_tier = "edge", escalation_tier =
+# "fast" (or "deep"). racecontrol's blind canary, circuit breaker, and instant
+# rollback all apply to the Apple tiers exactly as they do to your own.

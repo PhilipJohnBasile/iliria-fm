@@ -1,0 +1,8 @@
+.build/
+.swiftpm/
+*.o
+*.swiftmodule
+DerivedData/
+.DS_Store
+__pycache__/
+*.pyc
