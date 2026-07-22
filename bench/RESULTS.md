@@ -36,10 +36,21 @@ figures are *under contention*, not isolated bests.
 
 ## Through the racecontrol router
 
-| path | TTFT | tok/s | n |
-|---|---|---|---|
-| racecontrol → fm (edge), **after** the streaming fix | **0.678 s** | 29.4 | 4 |
-| racecontrol → trailbrake, *before* the streaming fix | 1.27 s\* | 26.7 | 4 |
+All rows below are attribution-verified via `X-Router-Backend`/`X-Router-Tier`, so each one is
+known to have been served by the tier named.
+
+| path | attribution | TTFT | tok/s | n |
+|---|---|---|---|---|
+| racecontrol → **fm-pcc** (cloud) | `fm-pcc` / `cloud` | 0.517 s | **60.2** | 4 |
+| racecontrol → fm-system (edge) | `fm-system` / `edge` | 0.653 s | 28.3 | 4 |
+| racecontrol → fm (edge), right after the streaming fix | `fm-system` / `edge` | 0.678 s | 29.4 | 4 |
+| racecontrol → trailbrake, *before* the streaming fix | `trailbrake` / `fast` | 1.27 s\* | 26.7 | 4 |
+
+Private Cloud Compute is the fastest path measured anywhere here — **60 tok/s through the
+router**, faster than any local tier, because the work happens on Apple's servers rather than
+contending for this machine's GPU. (Its 60.2 vs the 35.8 measured direct earlier is warm-up
+and server-side variance, not the router accelerating anything; the earlier figure was also
+dragged down by tool-call frames returning no content.)
 
 \* Pre-fix TTFT is not a real first-token time — see finding 1. Throughput through the router
 matches direct throughout (23–29 tok/s), i.e. **the router adds no meaningful decode
