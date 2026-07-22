@@ -15,12 +15,24 @@ figures are *under contention*, not isolated bests.
 | **trailbrake** | Qwen3-32B-4bit | Metal GPU | **0.228 s** | **22.8** | 5 |
 | **fm local** | Apple `system` | ANE | 0.443 s | 26.1 | 5 |
 | **fm cloud** | Apple `pcc` | Private Cloud Compute | 0.621 s | **35.8** | 5 |
-| **iliria** | GLM-5.2 744B MoE | Metal GPU + NVMe | ~37 s | ~0.5 | 1 |
+| ~~**iliria**~~ | ~~GLM-5.2 744B MoE~~ | ~~Metal GPU + NVMe~~ | ~~~37 s~~ | ~~~0.5~~ | ~~1~~ |
+| **iliria** (re-measured) | GLM-5.2 744B MoE | Metal GPU + NVMe | 30.3 s | **0.2** | 3 |
+
+> **Correction (2026-07-22).** The struck iliria row was wrong, and the bug was in *this
+> tool*, not the engine. `bench.py` used to fall back to counting SSE content chunks when a
+> stream carried no `usage` block. iliria's chunks are finer-grained than tokens, so the
+> fallback reported **chunks/sec as tok/s** and overstated decode by ~2.5×. The row is struck
+> rather than deleted so the error stays visible. The replacement row was produced by the
+> fixed tool, which now requests `stream_options.include_usage` and **withholds the rate
+> entirely** if no authoritative count arrives. Only iliria was affected — every other engine
+> here already sent `usage`, so their rows were counted correctly and are unchanged.
 
 - **trailbrake is the throughput/latency winner** — fastest to first token (0.23 s) and
   highest decode rate, even while sharing the GPU with a resident iliria.
-- **fm local is a genuinely useful tier-0**: ~19 tok/s at 0.55 s TTFT, on the **ANE**, so it
-  costs nothing on the Metal GPU or NVMe that the other tiers need. Free and private.
+- **fm local is a genuinely useful tier-0**: ~26 tok/s at 0.44 s TTFT, on the **ANE**, so it
+  costs nothing on the Metal GPU or NVMe that the other tiers need. Free and private. (An
+  independent n=5 re-check on 2026-07-22 landed at 27.7 tok/s / 0.58 s TTFT, corroborating
+  the table row; an earlier draft of this bullet cited a stale ~19 tok/s.)
 - **fm cloud (PCC) is the throughput winner at 35.8 tok/s** — the highest decode rate
   measured anywhere here, for a modest TTFT cost (0.62 s vs 0.44 s) covering the network hop.
   It is **not** gated by an entitlement, as first assumed: `fm` refuses PCC by *process
@@ -31,8 +43,10 @@ figures are *under contention*, not isolated bests.
   numbers greater than fifty". `bench.py` now reports why, and it is *not* a refusal as first
   assumed: `finish_reason = tool_calls`. PCC elects to **call a tool** for that prompt, and a
   content-only reader sees nothing. Prompts that answer directly are unaffected.
-- **iliria is the deep, slow escalation** — ~40–70× the TTFT of the fast tiers. Exactly why
-  it should serve only the hard minority of requests.
+- **iliria is the deep, slow escalation** — ~50–130× the TTFT of the fast tiers and ~100×
+  their decode rate. Exactly why it should serve only the hard minority of requests. Note
+  these figures are *under contention*: iliria shares the GPU with whatever else is resident,
+  and its 744B MoE weights stream from NVMe.
 
 ## Through the racecontrol router
 
