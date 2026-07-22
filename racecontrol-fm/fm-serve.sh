@@ -23,5 +23,5 @@ echo "[fm-serve] model availability on this machine:"
 fm available || true
 echo "[fm-serve] starting on ${HOST}:${PORT}"
 echo "[fm-serve]   system = on-device (ANE, free, private)"
-echo "[fm-serve]   pcc    = Private Cloud Compute (needs the private-cloud-compute entitlement/eligibility)"
+echo "[fm-serve]   pcc    = Private Cloud Compute (requires launching from Terminal.app -- see README)"
 exec fm serve --host "$HOST" --port "$PORT"

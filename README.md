@@ -50,9 +50,10 @@ racecontrol-fm/fm-serve.sh                                            # `fm serv
 racecontrol serve --config racecontrol-fm/router.fm.example.toml     # system=local, pcc=cloud
 ```
 
-On-device (`system`) works wherever Apple Intelligence is on; cloud (`pcc`) needs the
-`private-cloud-compute` entitlement/eligibility (until then it reports unavailable and the
-router falls back). Both run *off* your Metal GPU (on the ANE / Apple's servers).
+On-device (`system`) works wherever Apple Intelligence is on. Cloud (`pcc`) requires
+`fm serve` to be launched from **Terminal.app** — PCC is gated by *process context*, not an
+entitlement — after which both report available and any HTTP client can reach them. Both run
+*off* your Metal GPU (on the ANE / Apple's servers).
 
 ## Benchmarks
 

@@ -27,7 +27,7 @@ can actually run.
 | Tier | racecontrol `model_id` | Runs on | Notes |
 |---|---|---|---|
 | on-device (local) | `system` | Apple Neural Engine | Free, private, off your Metal GPU. Available whenever Apple Intelligence is on. |
-| cloud | `pcc` | Private Cloud Compute | Larger context + stronger reasoning. Needs the `com.apple.developer.private-cloud-compute` entitlement/eligibility — until then `fm available` reports it unavailable and the router's circuit breaker holds that backend open (with `fallback` keeping requests served). |
+| cloud | `pcc` | Private Cloud Compute | Larger context + stronger reasoning. Requires `fm serve` to be launched from **Terminal.app** — PCC is gated by *process context*, not an entitlement. Otherwise `fm available` reports it unavailable and the router's circuit breaker holds that backend open (with `fallback` keeping requests served). |
 
 ## Verified
 
@@ -40,8 +40,17 @@ $ curl -s localhost:8898/v1/chat/completions -d \
  "message":{"content":"OK","role":"assistant"}}],"usage":{"total_tokens":61,...}}
 ```
 
-`pcc` returns `available:false — "PCC inference is not available in this context"` here,
-which is the expected state until the entitlement is in place; the wiring is identical.
+**Private Cloud Compute needs `fm serve` started from Terminal.app.** Run from any other
+process context, `fm` refuses PCC with *"Private Cloud Compute is not available in this
+context. Please use the Terminal app."* — this is a process-attribution gate, **not** an
+entitlement. Launched from Terminal.app, `/health` reports both models available:
+
+```
+{"models":[{"name":"system","available":true},{"name":"pcc","available":true}]}
+```
+
+Only the *server's* context matters, so racecontrol (or any HTTP client) reaches PCC normally
+once `fm serve` is running that way.
 
 ## Why this respects racecontrol's design
 

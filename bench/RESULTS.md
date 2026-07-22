@@ -13,18 +13,23 @@ figures are *under contention*, not isolated bests.
 | path | model | hardware | TTFT | tok/s | n |
 |---|---|---|---|---|---|
 | **trailbrake** | Qwen3-32B-4bit | Metal GPU | **0.228 s** | **22.8** | 5 |
-| **fm local** | Apple `system` | ANE | 0.548 s | 19.4 | 5 |
-| **fm cloud** | Apple `pcc` | Private Cloud Compute | — | — | HTTP 503 |
+| **fm local** | Apple `system` | ANE | 0.443 s | 26.1 | 5 |
+| **fm cloud** | Apple `pcc` | Private Cloud Compute | 0.621 s | **35.8** | 5 |
 | **iliria** | GLM-5.2 744B MoE | Metal GPU + NVMe | ~37 s | ~0.5 | 1 |
 
 - **trailbrake is the throughput/latency winner** — fastest to first token (0.23 s) and
   highest decode rate, even while sharing the GPU with a resident iliria.
 - **fm local is a genuinely useful tier-0**: ~19 tok/s at 0.55 s TTFT, on the **ANE**, so it
   costs nothing on the Metal GPU or NVMe that the other tiers need. Free and private.
-- **fm cloud returns `HTTP 503`** — `fm available` reports *"PCC inference is not available
-  in this context"*. Private Cloud Compute requires the
-  `com.apple.developer.private-cloud-compute` entitlement/eligibility; the wiring is
-  identical to `system`, so this row fills in once that lands.
+- **fm cloud (PCC) is the throughput winner at 35.8 tok/s** — the highest decode rate
+  measured anywhere here, for a modest TTFT cost (0.62 s vs 0.44 s) covering the network hop.
+  It is **not** gated by an entitlement, as first assumed: `fm` refuses PCC by *process
+  context* — *"Private Cloud Compute is not available in this context. Please use the Terminal
+  app."* Launch `fm serve` from **Terminal.app** and `/health` reports `pcc available: true`;
+  an HTTP client then reaches it normally, since only the server's context matters.
+  Caveat: **2 of 5 PCC runs returned zero content tokens**, both on the same prompt ("List
+  three prime numbers greater than fifty") — reproducible, and most likely a guardrail refusal
+  surfaced in a response field this bench doesn't parse.
 - **iliria is the deep, slow escalation** — ~40–70× the TTFT of the fast tiers. Exactly why
   it should serve only the hard minority of requests.
 
