@@ -43,8 +43,10 @@ public struct IliriaEngineConfiguration: Hashable, Sendable {
 /// let reply = try await session.respond(to: "Summarize this in one line: …")
 /// ```
 ///
-/// The stack mirrors Apple's own local/cloud split: ``local()`` is the fast on-device
-/// tier, ``cloud()`` is the deep tier, and ``routed()`` hands the choice to racecontrol.
+/// ``local()`` is the fast tier, ``deep()`` is the deep-reasoning tier, and ``routed()``
+/// hands the choice to racecontrol. Every factory takes a `baseURL`: the defaults are
+/// loopback, but nothing here assumes localhost — point any of them at a remote host
+/// running the same OpenAI-compatible endpoint.
 @available(macOS 27.0, *)
 public struct IliriaLanguageModel: LanguageModel {
     public typealias Executor = IliriaEngineExecutor
@@ -73,14 +75,32 @@ public struct IliriaLanguageModel: LanguageModel {
             baseURL: baseURL, modelName: model, apiKey: apiKey, tier: .local))
     }
 
-    /// The deep-reasoning tier (iliria). Defaults to `ili serve` on port 8000.
-    public static func cloud(
+    /// The deep-reasoning tier (iliria, GLM-5.2). Defaults to a local `ili serve` on port
+    /// 8000 — but pass any `baseURL` to reach an iliria you host elsewhere.
+    ///
+    /// Note: this is always *your* deployment, local or remote. Apple's Private Cloud
+    /// Compute runs only Apple's own models and cannot host a third-party model such as
+    /// GLM-5.2; that is precisely why the framework exposes `LanguageModel` for
+    /// bring-your-own-provider instead.
+    public static func deep(
         baseURL: URL = URL(string: "http://127.0.0.1:8000")!,
         model: String = "iliria",
         apiKey: String? = nil
     ) -> IliriaLanguageModel {
         IliriaLanguageModel(configuration: IliriaEngineConfiguration(
             baseURL: baseURL, modelName: model, apiKey: apiKey, tier: .deep))
+    }
+
+    /// Former name for ``deep(baseURL:model:apiKey:)``. Renamed because "cloud" implied this
+    /// tier was cloud-hosted (it defaults to loopback) and invited confusion with Apple's
+    /// Private Cloud Compute, which cannot run third-party models.
+    @available(*, deprecated, renamed: "deep(baseURL:model:apiKey:)")
+    public static func cloud(
+        baseURL: URL = URL(string: "http://127.0.0.1:8000")!,
+        model: String = "iliria",
+        apiKey: String? = nil
+    ) -> IliriaLanguageModel {
+        deep(baseURL: baseURL, model: model, apiKey: apiKey)
     }
 
     /// Hand the local/deep decision to the racecontrol router. Defaults to port 8100.

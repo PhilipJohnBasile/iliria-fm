@@ -29,11 +29,18 @@ let session = LanguageModelSession(model: IliriaLanguageModel.local())   // trai
 let reply = try await session.respond(to: "Summarize this in one line: …")
 ```
 
-| Factory | Engine | Default | Apple analogue |
+| Factory | Engine | Default | Role |
 |---|---|---|---|
-| `.local()` | trailbrake (fast, Metal) | `:8080` | `SystemLanguageModel` |
-| `.cloud()` | iliria (deep, GLM-5.2) | `:8000` | `PrivateCloudComputeLanguageModel` |
-| `.routed()` | racecontrol | `:8100` | — |
+| `.local()` | trailbrake (fast, Metal) | `:8080` | fast tier |
+| `.deep()` | iliria (deep, GLM-5.2) | `:8000` | deep-reasoning escalation |
+| `.routed()` | racecontrol | `:8100` | router decides |
+
+Defaults are loopback, but **nothing assumes localhost** — pass any `baseURL` to reach an
+engine you host on another machine. These are always *your* deployments: Apple's Private
+Cloud Compute runs only Apple's own models and cannot host a third-party model like GLM-5.2,
+which is exactly why the framework offers `LanguageModel` for bring-your-own-provider.
+(`.cloud()` remains as a deprecated alias of `.deep()` — the old name wrongly implied the
+tier was cloud-hosted.)
 
 Forwards only to *your own* engines — no Apple model, no entitlement. v1 is text-only and
 throws a typed `IliriaEngineError.unsupportedFeature` if a request needs tools or guided
