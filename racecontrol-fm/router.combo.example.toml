@@ -1,0 +1,58 @@
+# Combo config: Apple's on-device model as tier-0 IN FRONT of your own engine.
+#
+# This is the interesting configuration the whole integration enables:
+#   edge  = Apple on-device (ANE, free, off your Metal GPU) -- handles the cheap majority
+#   fast  = trailbrake (Qwen3-32B-4bit, Metal GPU)          -- escalation for real work
+#
+# Prereqs:
+#   racecontrol-fm/fm-serve.sh                                   # `fm serve` on :8898
+#   trailbrake serve --model <mlx-checkpoint> --port 8080
+#   racecontrol check-config --config router.combo.example.toml
+#
+# A plain prompt is answered on-device; a prompt carrying a hard marker ("#deep")
+# escalates to trailbrake. Add iliria as a third "deep" tier the same way.
+
+[server]
+host = "127.0.0.1"
+port = 8100
+api_key = ""
+
+[escalation]
+policy = "default"
+default_tier = "edge"          # cheap on-device first
+escalation_tier = "fast"       # escalate real work to the GPU engine
+hard_markers = ["#deep", "#reason", "/escalate"]
+heuristic_threshold = 0.6
+enable_task_heuristic = true
+
+[circuit_breaker]
+failure_threshold = 3
+reset_after_s = 60.0
+
+[fallback]
+edge = "fast"
+fast = "edge"
+
+[[backends]]
+id = "fm-system"
+tier = "edge"
+base_url = "http://127.0.0.1:8898"
+model_id = "system"            # Apple on-device Foundation Model (ANE)
+weight = 100
+enabled = true
+role = "primary"
+rollback_target = true
+connect_timeout_s = 5.0
+idle_timeout_s = 30.0
+
+[[backends]]
+id = "trailbrake"
+tier = "fast"
+base_url = "http://127.0.0.1:8080"
+model_id = "default"           # trailbrake aliases "default" to whatever it loaded
+weight = 100
+enabled = true
+role = "primary"
+rollback_target = true
+connect_timeout_s = 5.0
+idle_timeout_s = 60.0

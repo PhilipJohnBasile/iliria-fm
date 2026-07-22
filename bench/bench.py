@@ -79,11 +79,19 @@ def main():
     ap.add_argument("--api-key", default=None)
     ap.add_argument("--n", type=int, default=len(DEFAULT_PROMPTS), help="number of requests")
     ap.add_argument("--max-tokens", type=int, default=128)
+    ap.add_argument("--prompt", default=None,
+                    help="use this single prompt for every run (overrides the built-in set); "
+                         "handy for forcing a router escalation marker such as '#deep ...'")
+    ap.add_argument("--label", default=None, help="label printed in the header")
     args = ap.parse_args()
 
-    prompts = (DEFAULT_PROMPTS * (args.n // len(DEFAULT_PROMPTS) + 1))[: args.n]
+    if args.prompt:
+        prompts = [args.prompt] * args.n
+    else:
+        prompts = (DEFAULT_PROMPTS * (args.n // len(DEFAULT_PROMPTS) + 1))[: args.n]
     rows = []
-    print(f"# {args.model} @ {args.base_url}  (max_tokens={args.max_tokens})")
+    print(f"# {args.label or args.model} @ {args.base_url}  "
+          f"(model={args.model}, max_tokens={args.max_tokens})")
     print(f"{'run':>3}  {'ttft_s':>8}  {'total_s':>8}  {'tokens':>6}  {'tok/s':>7}")
     for i, prompt in enumerate(prompts, 1):
         try:
