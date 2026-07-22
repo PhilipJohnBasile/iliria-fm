@@ -31,12 +31,18 @@ python3 bench/bench.py --base-url http://127.0.0.1:8898 --model system --n 5
 |---|---|---|---|---|
 | on-device | Apple `system` | ANE | ~1.1 s | ~9–14 |
 | deep | iliria GLM-5.2 | Metal GPU + NVMe | ~37 s | ~0.5 |
-| fast | trailbrake Qwen3-32B | Metal GPU | — | ~15–25 (quoted; not started this run) |
+| fast | trailbrake Qwen3-32B-4bit | Metal GPU | 0.35 s | 16.8 (under contention) |
 
 The on-device tier is ~20–30× faster to first token and ~20× higher throughput than the
 deep tier — which is the point: it absorbs cheap/short/structured work on the ANE, reserving
 the GPU and NVMe-streamed deep tier for the hard minority. (iliria's 0.5 tok/s here is under
 concurrent GPU load; quoted steady-state is ~1.6 tok/s.)
+
+Measurement note: trailbrake was benched with iliria **and** a protected side-project both
+still on the Metal GPU, single-request-at-a-time with a warmup and small `max_tokens` (to
+avoid a 3-way memory-pressure/OOM), and the row is labeled *under contention* accordingly —
+it still landed inside its quoted 15–25 tok/s band and beat the on-device tier to first
+token. A clean-GPU baseline can be added later by stopping the deep tier first.
 
 ## Full cross-tier
 
