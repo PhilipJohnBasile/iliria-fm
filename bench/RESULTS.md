@@ -25,6 +25,19 @@ racecontrol-fm/fm-serve.sh &                                      # fm serve :88
 python3 bench/bench.py --base-url http://127.0.0.1:8898 --model system --n 5
 ```
 
+## Measured cross-tier (this M5 Max)
+
+| tier | model | hardware | TTFT | tok/s |
+|---|---|---|---|---|
+| on-device | Apple `system` | ANE | ~1.1 s | ~9–14 |
+| deep | iliria GLM-5.2 | Metal GPU + NVMe | ~37 s | ~0.5 |
+| fast | trailbrake Qwen3-32B | Metal GPU | — | ~15–25 (quoted; not started this run) |
+
+The on-device tier is ~20–30× faster to first token and ~20× higher throughput than the
+deep tier — which is the point: it absorbs cheap/short/structured work on the ANE, reserving
+the GPU and NVMe-streamed deep tier for the hard minority. (iliria's 0.5 tok/s here is under
+concurrent GPU load; quoted steady-state is ~1.6 tok/s.)
+
 ## Full cross-tier
 
 The harness covers every tier; to compare, start each engine and point `--model` at what it
