@@ -42,9 +42,27 @@ which is exactly why the framework offers `LanguageModel` for bring-your-own-pro
 (`.cloud()` remains as a deprecated alias of `.deep()` — the old name wrongly implied the
 tier was cloud-hosted.)
 
-Forwards only to *your own* engines — no Apple model, no entitlement. v1 is text-only and
-throws a typed `IliriaEngineError.unsupportedFeature` if a request needs tools or guided
-generation, rather than silently dropping them. Build: `swift build` (Xcode 27 / macOS 27).
+Forwards only to *your own* engines — no Apple model, no entitlement. Build: `swift build`
+(Xcode 27 / macOS 27).
+
+**Tool calling.** `enabledToolDefinitions` become OpenAI `tools`: each definition's
+`parameters` is a `GenerationSchema`, whose `Codable` form is already JSON Schema, so it is
+spliced in verbatim. `GenerationOptions.toolCallingMode` maps to `tool_choice`
+(`required`/`none`/`auto`). Streamed `tool_calls` fragments come back as
+`.toolCalls(action: .toolCall(id:name:action: .appendArguments(…)))` — and because a streamed
+call splits its identity (first fragment) from its JSON arguments (later fragments), the
+executor tracks identity by index so every fragment is attributed correctly.
+
+**Guided generation.** A request `schema` becomes the `json_schema` response format via the
+same verbatim `GenerationSchema` → JSON Schema encoding.
+
+`capabilities` advertises exactly `[.toolCalling, .guidedGeneration]` — no more, no less.
+`.vision` is absent because image/attachment segments are not forwarded.
+
+> **Verification status:** compiles against the macOS 27 SDK, and the wire formats match what
+> the engines emit (trailbrake already streams `delta.tool_calls`). Tool calling and guided
+> generation have **not** yet been exercised end-to-end by a real FM app — worth doing before
+> depending on them.
 
 ## Direction B — Apple's FM → our router
 

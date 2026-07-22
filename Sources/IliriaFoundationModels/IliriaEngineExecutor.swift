@@ -3,12 +3,12 @@ import FoundationModels
 
 /// The bridge between the Foundation Models framework and an iliria-stack engine.
 ///
-/// The framework hands us a ``LanguageModelExecutorGenerationRequest`` (transcript +
-/// generation options); we translate it into an OpenAI-style streaming chat request,
-/// POST it to the engine, and forward each token delta back through the channel. This
-/// is exactly the role Apple documents for a `LanguageModelExecutor`: "the bridge
-/// between the framework types and the system that actually generates the tokens, like
-/// a server API or a local inference engine."
+/// The framework hands us a ``LanguageModelExecutorGenerationRequest`` (transcript,
+/// generation options, enabled tools, optional output schema); we translate it into an
+/// OpenAI-style streaming chat request, POST it to the engine, and forward text deltas and
+/// tool-call fragments back through the channel. This is exactly the role Apple documents
+/// for a `LanguageModelExecutor`: "the bridge between the framework types and the system
+/// that actually generates the tokens, like a server API or a local inference engine."
 @available(macOS 27.0, *)
 public struct IliriaEngineExecutor: LanguageModelExecutor {
     public typealias Configuration = IliriaEngineConfiguration
@@ -25,18 +25,6 @@ public struct IliriaEngineExecutor: LanguageModelExecutor {
         model: IliriaLanguageModel,
         streamingInto channel: LanguageModelExecutorGenerationChannel
     ) async throws {
-        // v1 is text-only. If the framework hands us a request that actually depends on
-        // a capability we don't implement yet, fail loudly with a typed error rather than
-        // silently ignoring it and returning a plain-text answer that pretends the tools /
-        // schema were honored. (These never fire in normal use: `capabilities` advertises
-        // neither, so the framework shouldn't attach them — this is the safety net.)
-        if !request.enabledToolDefinitions.isEmpty {
-            throw IliriaEngineError.unsupportedFeature("tool calling (v1 of this adapter is text-only)")
-        }
-        if request.schema != nil {
-            throw IliriaEngineError.unsupportedFeature("guided / structured generation (v1 of this adapter is text-only)")
-        }
-
         let httpRequest = try makeRequest(from: request)
         let (bytes, response) = try await URLSession.shared.bytes(for: httpRequest)
 
@@ -54,9 +42,13 @@ public struct IliriaEngineExecutor: LanguageModelExecutor {
 
         var promptTokens = 0
         var completionTokens = 0
+        // A streamed tool call is split across chunks: the first fragment carries id + name,
+        // every later one only an index plus the next slice of the JSON arguments. Remember
+        // the identity by index so the later fragments can be attributed.
+        var toolCalls: [Int: (id: String, name: String)] = [:]
         let decoder = JSONDecoder()
 
-        // Server-Sent Events: one `data: {json}` frame per token chunk, `data: [DONE]` to end.
+        // Server-Sent Events: one `data: {json}` frame per chunk, `data: [DONE]` to finish.
         for try await line in bytes.lines {
             guard line.hasPrefix("data:") else { continue }
             let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
@@ -67,9 +59,31 @@ public struct IliriaEngineExecutor: LanguageModelExecutor {
                   let chunk = try? decoder.decode(StreamChunk.self, from: data)
             else { continue }
 
-            if let delta = chunk.choices.first?.delta.content, !delta.isEmpty {
-                await channel.send(.response(action: .appendText(delta, tokenCount: 0)))
+            let choice = chunk.choices.first
+
+            if let text = choice?.delta.content, !text.isEmpty {
+                await channel.send(.response(action: .appendText(text, tokenCount: 0)))
             }
+
+            for fragment in choice?.delta.toolCalls ?? [] {
+                let index = fragment.index ?? 0
+                let isNewCall = fragment.id != nil && toolCalls[index] == nil
+                if let id = fragment.id, let name = fragment.function?.name, !name.isEmpty {
+                    toolCalls[index] = (id, name)
+                }
+                guard let call = toolCalls[index] else { continue }
+                let arguments = fragment.function?.arguments ?? ""
+                // Emit on first sight even with empty arguments, so a zero-argument call is
+                // still announced to the framework rather than never appearing.
+                if isNewCall || !arguments.isEmpty {
+                    await channel.send(.toolCalls(action: .toolCall(
+                        id: call.id,
+                        name: call.name,
+                        action: .appendArguments(arguments, tokenCount: 0)
+                    )))
+                }
+            }
+
             if let usage = chunk.usage {
                 promptTokens = usage.promptTokens ?? promptTokens
                 completionTokens = usage.completionTokens ?? completionTokens
@@ -87,14 +101,52 @@ public struct IliriaEngineExecutor: LanguageModelExecutor {
     // MARK: - Framework → OpenAI translation
 
     private func makeRequest(from request: LanguageModelExecutorGenerationRequest) throws -> URLRequest {
-        let body = ChatCompletionsRequest(
-            model: configuration.modelName,
-            messages: Self.messages(from: request.transcript),
-            stream: true,
-            temperature: Self.temperature(for: request.generationOptions),
-            topP: Self.topP(for: request.generationOptions),
-            maxTokens: request.generationOptions.maximumResponseTokens
-        )
+        var body: [String: Any] = [
+            "model": configuration.modelName,
+            "messages": Self.messages(from: request.transcript).map {
+                ["role": $0.role, "content": $0.content]
+            },
+            "stream": true,
+        ]
+        if let temperature = Self.temperature(for: request.generationOptions) {
+            body["temperature"] = temperature
+        }
+        if let topP = Self.topP(for: request.generationOptions) {
+            body["top_p"] = topP
+        }
+        if let maxTokens = request.generationOptions.maximumResponseTokens {
+            body["max_tokens"] = maxTokens
+        }
+
+        // Guided generation. `GenerationSchema` is Codable and its JSON form is already a
+        // JSON Schema, so it maps straight onto the OpenAI json_schema response format --
+        // no need to re-model arbitrary schema JSON in Swift.
+        if let schema = request.schema {
+            body["response_format"] = [
+                "type": "json_schema",
+                "json_schema": [
+                    "name": schema.name,
+                    "schema": try Self.jsonObject(from: schema),
+                ] as [String: Any],
+            ] as [String: Any]
+        }
+
+        // Tool calling. Each ToolDefinition carries its parameters as a GenerationSchema.
+        if !request.enabledToolDefinitions.isEmpty {
+            body["tools"] = try request.enabledToolDefinitions.map { definition in
+                [
+                    "type": "function",
+                    "function": [
+                        "name": definition.name,
+                        "description": definition.description,
+                        "parameters": try Self.jsonObject(from: definition.parameters),
+                    ] as [String: Any],
+                ] as [String: Any]
+            }
+            if let choice = Self.toolChoice(for: request.generationOptions) {
+                body["tool_choice"] = choice
+            }
+        }
 
         var http = URLRequest(url: configuration.baseURL.appendingPathComponent("v1/chat/completions"))
         http.httpMethod = "POST"
@@ -103,13 +155,18 @@ public struct IliriaEngineExecutor: LanguageModelExecutor {
         if let key = configuration.apiKey {
             http.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         }
-        http.httpBody = try JSONEncoder().encode(body)
+        http.httpBody = try JSONSerialization.data(withJSONObject: body)
         return http
     }
 
+    /// Round-trip a `GenerationSchema` through its own Codable form into plain JSON objects,
+    /// so it can be spliced verbatim into the request body.
+    static func jsonObject(from schema: GenerationSchema) throws -> Any {
+        try JSONSerialization.jsonObject(with: JSONEncoder().encode(schema))
+    }
+
     /// Flatten the transcript into OpenAI chat messages. Instructions → system,
-    /// prompts → user, prior responses → assistant. Tool-call / tool-output / reasoning
-    /// entries are not forwarded to a plain chat-completions endpoint in v1.
+    /// prompts → user, prior responses → assistant.
     static func messages(from transcript: Transcript) -> [ChatMessage] {
         var messages: [ChatMessage] = []
         for entry in transcript {
@@ -127,8 +184,8 @@ public struct IliriaEngineExecutor: LanguageModelExecutor {
         return messages
     }
 
-    /// Concatenate the plain-text segments of a transcript entry. Structured/attachment
-    /// segments are ignored in v1 (text-only bridging).
+    /// Concatenate the plain-text segments of a transcript entry. Structured and attachment
+    /// segments (images) are not forwarded — this adapter is text + tools.
     static func text(of segments: [Transcript.Segment]) -> String {
         segments.reduce(into: "") { accumulated, segment in
             if case .text(let textSegment) = segment {
@@ -150,6 +207,15 @@ public struct IliriaEngineExecutor: LanguageModelExecutor {
         if let kind = options.samplingMode?.kind, case .nucleus(let threshold, _) = kind {
             return threshold
         }
+        return nil
+    }
+
+    /// Map the framework's tool-calling mode onto OpenAI's `tool_choice`.
+    static func toolChoice(for options: GenerationOptions) -> String? {
+        guard let mode = options.toolCallingMode else { return nil }
+        if mode == .required { return "required" }
+        if mode == .disallowed { return "none" }
+        if mode == .allowed { return "auto" }
         return nil
     }
 }

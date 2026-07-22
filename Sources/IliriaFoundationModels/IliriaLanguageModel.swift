@@ -57,10 +57,13 @@ public struct IliriaLanguageModel: LanguageModel {
         self.executorConfiguration = configuration
     }
 
-    /// v1 forwards plain streamed chat completions. Tool calling, guided generation,
-    /// and vision are declared here only once the executor actually wires them.
+    /// Declared to match exactly what the executor implements: streamed text, tool calling
+    /// (transcript tool definitions → OpenAI `tools`, with streamed `tool_calls` fragments
+    /// relayed back), and guided generation (`GenerationSchema` → the `json_schema` response
+    /// format). `.vision` is deliberately absent — image/attachment segments are not
+    /// forwarded.
     public var capabilities: LanguageModelCapabilities {
-        LanguageModelCapabilities([])
+        LanguageModelCapabilities([.toolCalling, .guidedGeneration])
     }
 
     // MARK: - Local + cloud + routed factories
