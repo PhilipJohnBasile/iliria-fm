@@ -27,8 +27,10 @@ figures are *under contention*, not isolated bests.
 > entirely** if no authoritative count arrives. Only iliria was affected — every other engine
 > here already sent `usage`, so their rows were counted correctly and are unchanged.
 
-- **trailbrake is the throughput/latency winner** — fastest to first token (0.23 s) and
-  highest decode rate, even while sharing the GPU with a resident iliria.
+- **trailbrake is the latency winner** — fastest to first token (0.228 s) of anything measured
+  here, even while sharing the GPU with a resident iliria. It is *not* the throughput winner:
+  at 22.8 tok/s it has the lowest decode rate of the three fast tiers (fm local 26.1, fm cloud
+  35.8). An earlier version of this bullet claimed both, contradicting the table above it.
 - **fm local is a genuinely useful tier-0**: ~26 tok/s at 0.44 s TTFT, on the **ANE**, so it
   costs nothing on the Metal GPU or NVMe that the other tiers need. Free and private. (An
   independent n=5 re-check on 2026-07-22 landed at 27.7 tok/s / 0.58 s TTFT, corroborating
@@ -43,8 +45,10 @@ figures are *under contention*, not isolated bests.
   numbers greater than fifty". `bench.py` now reports why, and it is *not* a refusal as first
   assumed: `finish_reason = tool_calls`. PCC elects to **call a tool** for that prompt, and a
   content-only reader sees nothing. Prompts that answer directly are unaffected.
-- **iliria is the deep, slow escalation** — ~50–130× the TTFT of the fast tiers and ~100×
-  their decode rate. Exactly why it should serve only the hard minority of requests. Note
+- **iliria is the deep, slow escalation** — ~50–130× the TTFT of the fast tiers, and its decode
+  rate is **1/114th to 1/179th** of theirs (0.2 vs 22.8–35.8 tok/s). An earlier version of this
+  bullet said "~100× their decode rate", which read as iliria being the faster one and
+  understated the gap besides. Exactly why it should serve only the hard minority of requests. Note
   these figures are *under contention*: iliria shares the GPU with whatever else is resident,
   and its 744B MoE weights stream from NVMe.
 
