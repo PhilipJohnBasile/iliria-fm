@@ -20,6 +20,26 @@ public struct IliriaEngineExecutor: LanguageModelExecutor {
         self.configuration = configuration
     }
 
+    /// The framework calls this when a session is prewarmed, "to load assets into memory or
+    /// pre-fill caches."
+    ///
+    /// For an HTTP-backed engine the useful work is establishing the connection and nudging
+    /// the engine to have its weights resident before the first real prompt — TTFT is the
+    /// metric that most rewards this (measured cold vs warm on the on-device tier: 1.26 s →
+    /// 0.44 s). `prewarm` is non-throwing and must not block the caller, so this is
+    /// deliberately fire-and-forget: a failure here is a missed optimisation, never an error
+    /// the user should see.
+    public func prewarm(model: IliriaLanguageModel, transcript: Transcript) {
+        let url = configuration.baseURL.appendingPathComponent("v1/models")
+        var probe = URLRequest(url: url)
+        probe.httpMethod = "GET"
+        probe.timeoutInterval = 5
+        if let key = configuration.apiKey {
+            probe.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
+        Task { _ = try? await URLSession.shared.data(for: probe) }
+    }
+
     public func respond(
         to request: LanguageModelExecutorGenerationRequest,
         model: IliriaLanguageModel,
@@ -39,6 +59,18 @@ public struct IliriaEngineExecutor: LanguageModelExecutor {
             }
             throw IliriaEngineError.httpStatus(code: http.statusCode, body: body)
         }
+
+        // Apple's prescribed ordering (WWDC26 "Bring an LLM provider to the Foundation Models
+        // framework"): report metadata first, so a caller learns which model/request it got
+        // without waiting for the stream to finish. Input-token usage is *also* meant to go
+        // up front, but an OpenAI-compatible backend only reports usage in its final frame,
+        // so it is forwarded below the moment it actually arrives.
+        await channel.send(.response(action: .updateMetadata([
+            "modelID": configuration.modelName,
+            "requestID": request.id.uuidString,
+            "tier": configuration.tier.rawValue,
+            "endpoint": configuration.baseURL.absoluteString,
+        ])))
 
         var promptTokens = 0
         var completionTokens = 0
