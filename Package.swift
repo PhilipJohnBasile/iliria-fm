@@ -10,8 +10,19 @@ let package = Package(
     platforms: [.macOS("26.0")],
     products: [
         .library(name: "IliriaFoundationModels", targets: ["IliriaFoundationModels"]),
+        .executable(name: "iliria-fm-verify", targets: ["iliria-fm-verify"]),
     ],
     targets: [
         .target(name: "IliriaFoundationModels"),
+        .testTarget(
+            name: "IliriaFoundationModelsTests",
+            dependencies: ["IliriaFoundationModels"]
+        ),
+        // End-to-end check against a running OpenAI-compatible engine. Not a unit test:
+        // it drives a real LanguageModelSession through the provider. See its --help.
+        .executableTarget(
+            name: "iliria-fm-verify",
+            dependencies: ["IliriaFoundationModels"]
+        ),
     ]
 )

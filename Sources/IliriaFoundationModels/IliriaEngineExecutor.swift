@@ -42,10 +42,7 @@ public struct IliriaEngineExecutor: LanguageModelExecutor {
 
         var promptTokens = 0
         var completionTokens = 0
-        // A streamed tool call is split across chunks: the first fragment carries id + name,
-        // every later one only an index plus the next slice of the JSON arguments. Remember
-        // the identity by index so the later fragments can be attributed.
-        var toolCalls: [Int: (id: String, name: String)] = [:]
+        var toolCalls = ToolCallRelay()
         let decoder = JSONDecoder()
 
         // Server-Sent Events: one `data: {json}` frame per chunk, `data: [DONE]` to finish.
@@ -65,23 +62,12 @@ public struct IliriaEngineExecutor: LanguageModelExecutor {
                 await channel.send(.response(action: .appendText(text, tokenCount: 0)))
             }
 
-            for fragment in choice?.delta.toolCalls ?? [] {
-                let index = fragment.index ?? 0
-                let isNewCall = fragment.id != nil && toolCalls[index] == nil
-                if let id = fragment.id, let name = fragment.function?.name, !name.isEmpty {
-                    toolCalls[index] = (id, name)
-                }
-                guard let call = toolCalls[index] else { continue }
-                let arguments = fragment.function?.arguments ?? ""
-                // Emit on first sight even with empty arguments, so a zero-argument call is
-                // still announced to the framework rather than never appearing.
-                if isNewCall || !arguments.isEmpty {
-                    await channel.send(.toolCalls(action: .toolCall(
-                        id: call.id,
-                        name: call.name,
-                        action: .appendArguments(arguments, tokenCount: 0)
-                    )))
-                }
+            for emission in toolCalls.accept(choice?.delta.toolCalls ?? []) {
+                await channel.send(.toolCalls(action: .toolCall(
+                    id: emission.id,
+                    name: emission.name,
+                    action: .appendArguments(emission.arguments, tokenCount: 0)
+                )))
             }
 
             if let usage = chunk.usage {
@@ -194,20 +180,31 @@ public struct IliriaEngineExecutor: LanguageModelExecutor {
         }
     }
 
-    /// Greedy sampling maps to temperature 0; otherwise pass the requested temperature through.
+    /// Greedy sampling maps to temperature 0; otherwise the caller's explicit temperature is
+    /// forwarded unchanged.
+    ///
+    /// This deliberately compares `SamplingMode` **by value** rather than switching on
+    /// `SamplingMode.kind`. On the macOS 27 beta the SDK declares `Kind` cases (`.nucleus`,
+    /// `.top`) whose symbols are *absent from the installed runtime framework*, so merely
+    /// referencing them can fail at dyld load time — verified directly:
+    /// `Symbol not found: …GenerationOptions.SamplingMode.Kind.nucleus…`. That would be a
+    /// launch crash for any app embedding this package. The Equatable path resolves fine.
     static func temperature(for options: GenerationOptions) -> Double? {
-        if let kind = options.samplingMode?.kind, case .greedy = kind {
+        if options.samplingMode == .greedy {
             return 0.0
         }
         return options.temperature
     }
 
-    /// Nucleus sampling maps its probability threshold to `top_p`.
+    /// Nucleus sampling's probability threshold is **not** forwarded as `top_p` yet.
+    ///
+    /// Recovering the threshold requires `SamplingMode.kind`, whose non-greedy cases are
+    /// missing from the macOS 27 beta runtime (see ``temperature(for:)``). Rather than risk a
+    /// load-time crash, the threshold is dropped; the caller's explicit `temperature` is
+    /// still honored, so sampling is narrowed rather than ignored. Restore this the moment
+    /// the runtime ships `Kind` — it is a two-line change plus its test.
     static func topP(for options: GenerationOptions) -> Double? {
-        if let kind = options.samplingMode?.kind, case .nucleus(let threshold, _) = kind {
-            return threshold
-        }
-        return nil
+        nil
     }
 
     /// Map the framework's tool-calling mode onto OpenAI's `tool_choice`.

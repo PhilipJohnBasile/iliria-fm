@@ -59,10 +59,27 @@ same verbatim `GenerationSchema` → JSON Schema encoding.
 `capabilities` advertises exactly `[.toolCalling, .guidedGeneration]` — no more, no less.
 `.vision` is absent because image/attachment segments are not forwarded.
 
-> **Verification status:** compiles against the macOS 27 SDK, and the wire formats match what
-> the engines emit (trailbrake already streams `delta.tool_calls`). Tool calling and guided
-> generation have **not** yet been exercised end-to-end by a real FM app — worth doing before
-> depending on them.
+> ### ⛔ Direction A does not run on the current macOS 27 beta
+>
+> The provider compiles against the macOS 27 SDK, and the framework **does** invoke the
+> executor — but an executor's only way to emit output, `LanguageModelExecutorGenerationChannel.send`,
+> is **declared in the SDK and absent from the installed runtime framework**:
+>
+> ```
+> dyld: Symbol not found: _$s16FoundationModels38LanguageModelExecutorGenerationChannelV4sendyyxYaAC5EventRzlF
+>   Expected in: /System/Library/Frameworks/FoundationModels.framework
+> ```
+>
+> The result is `EXC_BAD_ACCESS` (jump to null) on the first token, from inside
+> `IliriaEngineExecutor.respond`. `GenerationOptions.SamplingMode.Kind`'s `.nucleus`/`.top`
+> cases are missing the same way (which is why nucleus → `top_p` is not forwarded).
+>
+> This is a **beta SDK/runtime mismatch, not a defect in this package** — the implementation
+> follows the documented contract and should work unchanged once the runtime ships those
+> symbols. Until then Direction A is **not usable at runtime**; verify with
+> `swift run iliria-fm-verify` against a running engine (it exists precisely to detect this).
+>
+> **Direction B is unaffected** — it is plain HTTP to `fm serve` and is measured working.
 
 ## Direction B — Apple's FM → our router
 
